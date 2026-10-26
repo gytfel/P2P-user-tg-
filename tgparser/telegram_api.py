@@ -6,12 +6,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 import time
 from getpass import getpass
 from urllib.parse import unquote, urlsplit
 
 from . import statuses as st
+
+# Вместо «Attempt 1 at connecting failed» от Telethon пишем своё понятное сообщение.
+logging.getLogger("telethon").setLevel(logging.ERROR)
 
 PROXY_SCHEMES = ("socks5", "socks4", "http")
 CONNECT_TIMEOUT = 60
@@ -69,12 +73,14 @@ class TelegramApiChecker:
         self.interval = interval
         self.max_flood_wait = max_flood_wait
         self.enabled = True
+        self.account = ""
         self._lock = asyncio.Lock()
         self._last_call = 0.0
 
     async def start(self) -> None:
         # Общий таймаут: при «замедлении» Telegram соединение открывается, но данные не идут,
         # и без него подключение висело бы бесконечно.
+        print("Подключаюсь к Telegram API (до минуты)…", file=sys.stderr, flush=True)
         await asyncio.wait_for(self.client.connect(), CONNECT_TIMEOUT)
         # При первом запуске спросит телефон и код, дальше берёт сессию из файла.
         await self.client.start(
@@ -83,7 +89,8 @@ class TelegramApiChecker:
             password=lambda: getpass("Облачный пароль (двухэтапная аутентификация, ввод скрыт): "),
         )
         me = await self.client.get_me()
-        print(f"Telegram API: вошли как @{me.username or me.id}", file=sys.stderr)
+        self.account = f"@{me.username}" if me.username else str(me.id)
+        print(f"Telegram API: вошли как {self.account}", file=sys.stderr)
 
     async def stop(self) -> None:
         await self.client.disconnect()

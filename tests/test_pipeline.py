@@ -203,3 +203,16 @@ def test_search_continues_without_api_when_offline(tmp_path, monkeypatch, capsys
     assert read_csv(out / "results.csv")["freename"]["status"] == st.LIKELY_FREE
     assert OfflineApi.stopped
     assert "Продолжаю без Telegram API" in capsys.readouterr().err
+
+
+def test_short_names_do_not_connect_to_api(tmp_path, monkeypatch):
+    import tgparser.cli as cli
+
+    made = []
+    monkeypatch.setattr(web, "make_client", mock_make_client)
+    monkeypatch.setattr(cli, "make_api_checker", lambda args, required: made.append(1))
+    out = tmp_path / "out"
+    assert main(["check", "qzxw", "news", "--out", str(out), "--tme-delay", "0", "--fragment-delay", "0"]) == 0
+    assert made == []  # только 4-символьные — API не нужен
+    assert main(["check", "freename", "--out", str(out), "--tme-delay", "0", "--fragment-delay", "0"]) == 0
+    assert made == [1]

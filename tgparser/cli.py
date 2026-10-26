@@ -15,7 +15,7 @@ from typing import Iterable, Iterator
 from . import statuses as st
 from .generators import BUILTIN_LISTS, SHORT_PRESETS, iter_short, iter_words, read_wordlist
 from .pipeline import ApiConfirmer, ApiUnavailable, Result, TooManyErrors, UsernameChecker, run_checks
-from .rules import MAX_LEN, MIN_LEN_COLLECTIBLE, MIN_LEN_REGULAR, normalize
+from .rules import MAX_LEN, MIN_LEN_COLLECTIBLE, MIN_LEN_REGULAR, is_collectible_only, normalize
 from .storage import ResultStore
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -162,6 +162,19 @@ def load_env() -> None:
     load_dotenv(ENV_FILE, override=True)
 
 
+def save_env(values: dict[str, str], path: Path | None = None) -> Path:
+    """Записывает значения в .env (и в окружение), остальные строки файла оставляет как были."""
+    path = path or ENV_FILE
+    lines = []
+    if path.exists():
+        prefixes = tuple(f"{key}=" for key in values)
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith(prefixes)]
+    lines += [f"{key}={value}" for key, value in values.items()]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.environ.update(values)
+    return path
+
+
 def make_api_checker(args: argparse.Namespace, required: bool):
     """Telegram API включается сам, если в .env есть ключи; --no-api отключает его."""
     if getattr(args, "no_api", False):
@@ -199,19 +212,24 @@ async def start_api(api, required: bool) -> bool:
 
     try:
         await api.start()
-        return True
     except (OSError, asyncio.TimeoutError):
         await api.stop()
         if required:
             raise SystemExit(CONNECT_HELP)
         print(f"{CONNECT_HELP}\n\nПродолжаю без Telegram API.\n", file=sys.stderr)
         return False
+    account = getattr(api, "account", "")
+    if account and os.environ.get("TG_USER") != account:
+        save_env({"TG_USER": account})  # для строки состояния в меню
+    return True
 
 
 async def check_all(args: argparse.Namespace, candidates: list[tuple[str, str]], store: ResultStore):
     from .web import FragmentChecker, TmeChecker, make_client
 
-    api = make_api_checker(args, required=args.api)
+    # 4-символьные проверяются только через Fragment — к API без нужды не подключаемся.
+    needs_api = any(not is_collectible_only(name) for name, _ in candidates)
+    api = make_api_checker(args, required=args.api) if needs_api or args.api else None
     if api and not await start_api(api, required=args.api):
         api = None
     try:

@@ -32,20 +32,11 @@ def api_configured() -> bool:
 
 
 def logged_in() -> bool:
-    return Path(f"{cli.DEFAULT_SESSION}.session").exists()
+    """Вход подтверждён: после успешного входа аккаунт записывается в .env (TG_USER)."""
+    return bool(os.environ.get("TG_USER", "").strip())
 
 
-def save_env(values: dict[str, str], path: Path | None = None) -> Path:
-    """Записывает значения в .env (и в окружение), остальные строки файла оставляет как были."""
-    path = path or cli.ENV_FILE
-    lines = []
-    if path.exists():
-        prefixes = tuple(f"{key}=" for key in values)
-        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith(prefixes)]
-    lines += [f"{key}={value}" for key, value in values.items()]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.environ.update(values)
-    return path
+save_env = cli.save_env
 
 
 def _valid_proxy(value: str) -> bool:
@@ -114,7 +105,7 @@ def _ask_proxy() -> bool:
 
 
 def login() -> bool:
-    async def go() -> None:
+    async def go() -> str:
         from .telegram_api import TelegramApiChecker
 
         api = TelegramApiChecker(
@@ -127,6 +118,7 @@ def login() -> bool:
         )
         try:
             await api.start()
+            return api.account
         finally:
             await api.stop()
 
@@ -134,7 +126,7 @@ def login() -> bool:
 
     while True:
         try:
-            asyncio.run(go())
+            account = asyncio.run(go())
         except ImportError as e:
             print(f"Не хватает библиотеки ({e.name}). Закройте окно и запустите start.bat ещё раз — он доустановит.")
             return False
@@ -154,7 +146,8 @@ def login() -> bool:
         except Exception as e:
             print(f"Не удалось войти: {e}\nПроверьте api_id и api_hash (пункт «Настроить Telegram API» в меню).")
             return False
-        print("Готово: Telegram API настроен.")
+        save_env({"TG_USER": account})
+        print(f"Готово: Telegram API настроен, аккаунт {account}.")
         return True
 
 
@@ -206,8 +199,8 @@ def _status() -> str:
         return "Telegram API: не настроен — имена с «Некорректное имя» не отсеиваются (пункт 8)"
     via = " (через прокси)" if os.environ.get("TG_PROXY", "").strip() else ""
     if not logged_in():
-        return f"Telegram API: ключи есть, но вход ещё не выполнен — пункт 8{via}"
-    return f"Telegram API: настроен{via}"
+        return f"Telegram API: ключи есть, но вход ещё не выполнен — включите VPN и выберите пункт 8{via}"
+    return f"Telegram API: настроен, аккаунт {os.environ['TG_USER']}{via}"
 
 
 def run_menu() -> int:

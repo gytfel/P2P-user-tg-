@@ -111,6 +111,7 @@ class FlakyTelegram:
 
     def __init__(self, *args, proxy=None):
         self.proxy = proxy
+        self.account = "@tester"
         FlakyTelegram.instances.append(self)
 
     async def start(self):
@@ -139,6 +140,8 @@ def test_login_asks_for_proxy_after_timeout(flaky, monkeypatch, capsys):
     assert "VPN" in out and "Не похоже на прокси" in out
     assert [t.proxy for t in FlakyTelegram.instances] == [None, "socks5://user:pass@1.2.3.4:1080"]
     assert "TG_PROXY=socks5://user:pass@1.2.3.4:1080" in flaky.read_text(encoding="utf-8")
+    assert "TG_USER=@tester" in flaky.read_text(encoding="utf-8")
+    assert menu._status() == "Telegram API: настроен, аккаунт @tester (через прокси)"
 
 
 def test_login_retry_after_vpn(flaky, monkeypatch):
@@ -160,3 +163,10 @@ def test_login_can_remove_bad_proxy(flaky, monkeypatch):
     assert [t.proxy for t in FlakyTelegram.instances] == ["socks5://9.9.9.9:1", ""]
     assert "TG_PROXY=\n" in flaky.read_text(encoding="utf-8")
     assert "(через прокси)" not in menu._status()
+
+
+def test_status_before_login(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "ENV_FILE", tmp_path / ".env")
+    assert "не настроен" in menu._status()
+    menu.save_env({"TG_API_ID": "123", "TG_API_HASH": "a" * 32})
+    assert "вход ещё не выполнен" in menu._status()
