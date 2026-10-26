@@ -1,4 +1,4 @@
-"""Командная строка: python -m tgparser {words,short,check} ..."""
+"""Командная строка: python -m tgparser {words,short,check,confirm} ..."""
 from __future__ import annotations
 
 import argparse
@@ -11,9 +11,14 @@ from typing import Iterable, Iterator
 
 from . import statuses as st
 from .generators import BUILTIN_LISTS, SHORT_PRESETS, iter_short, iter_words, read_wordlist
-from .pipeline import Result, TooManyErrors, UsernameChecker, run_checks
+from .pipeline import ApiConfirmer, ApiUnavailable, Result, TooManyErrors, UsernameChecker, run_checks
 from .rules import MAX_LEN, MIN_LEN_COLLECTIBLE, MIN_LEN_REGULAR, normalize
 from .storage import ResultStore
+
+API_KEYS_HELP = (
+    "Нужны TG_API_ID и TG_API_HASH (https://my.telegram.org → API development tools): "
+    "скопируйте .env.example в .env и впишите их."
+)
 
 
 def _csv_list(value: str) -> list[str]:
@@ -25,10 +30,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m tgparser",
         description="Поиск свободных юзернеймов Telegram: слова, бренды, крипта и 4-символьные.",
     )
-    common = argparse.ArgumentParser(add_help=False)
-    g = common.add_argument_group("общие настройки")
+    base = argparse.ArgumentParser(add_help=False)
+    g = base.add_argument_group("общие настройки")
     g.add_argument("--out", type=Path, default=Path("results"), help="папка для результатов (по умолчанию results)")
-    g.add_argument("--limit", type=int, help="проверить не больше N новых юзернеймов")
+    g.add_argument("--limit", type=int, help="проверить не больше N юзернеймов")
+
+    web = argparse.ArgumentParser(add_help=False)
+    g = web.add_argument_group("проверка")
     g.add_argument("--dry-run", action="store_true", help="только показать кандидатов, ничего не проверять")
     g.add_argument("--recheck", action="store_true", help="перепроверить уже проверенные")
     g.add_argument("--concurrency", type=int, default=4, help="параллельных проверок (по умолчанию 4)")
@@ -36,7 +44,17 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--fragment-delay", type=float, default=0.6, help="секунд между запросами к fragment.com (0.6)")
     g.add_argument("--no-fragment", action="store_true", help="не проверять fragment.com для 5+ символов")
     g.add_argument("--proxy", help="прокси, например http://user:pass@host:port или socks5://host:port")
-    g.add_argument("--api", action="store_true", help="подтверждать находки через Telegram API (нужен .env)")
+    mode = g.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--api",
+        action="store_true",
+        help="обязательно проверять через Telegram API (без ключей в .env — ошибка). "
+        "Если ключи в .env есть, API включается и без этого флага",
+    )
+    mode.add_argument("--no-api", action="store_true", help="не использовать Telegram API, даже если .env заполнен")
+
+    api = argparse.ArgumentParser(add_help=False)
+    g = api.add_argument_group("Telegram API")
     g.add_argument("--api-delay", type=float, default=2.0, help="секунд между запросами к API (2.0)")
     g.add_argument("--max-flood-wait", type=int, default=900, help="при FloodWait дольше N секунд отключить API (900)")
     g.add_argument("--session", default="tgparser", help="файл сессии Telethon (tgparser.session)")
@@ -45,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     words = sub.add_parser(
         "words",
-        parents=[common],
+        parents=[base, web, api],
         help="реальные слова, крипта и компании (5+ символов)",
         description="Проверка реальных слов, крипто-терминов и названий компаний.",
     )
@@ -61,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     short = sub.add_parser(
         "short",
-        parents=[common],
+        parents=[base, web, api],
         help="4-символьные юзернеймы (только через Fragment)",
         description="4-символьные юзернеймы. Шаблоны: L буква, V гласная, C согласная, D цифра, "
         "A буква или цифра; строчные буквы и цифры — как есть (например xDDD, LLLa, CVCV).",
@@ -78,11 +96,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser(
         "check",
-        parents=[common],
+        parents=[base, web, api],
         help="свой список юзернеймов (файлы и/или имена)",
         description="Проверка своих юзернеймов: имена через пробел и/или .txt файлы (по одному в строке).",
     )
     check.add_argument("items", nargs="+", help="юзернеймы или пути к файлам")
+
+    sub.add_parser(
+        "confirm",
+        parents=[base, api],
+        help="перепроверить «вероятно свободные» через Telegram API",
+        description="Перепроверяет через Telegram API все «вероятно свободные» из results.csv: "
+        "зарезервированные («Некорректное имя» в приложении) уходят из списка находок.",
+    )
     return parser
 
 
@@ -109,18 +135,46 @@ def _iter_custom(items: Iterable[str]) -> Iterator[tuple[str, str]]:
                 yield name, source
 
 
-def print_result(result: Result) -> None:
-    if result.status in st.FINDINGS:
+def print_result(result: Result, everything: bool = False) -> None:
+    if everything or result.status in st.FINDINGS:
         label = st.LABELS[result.status]
         print(f"[{label}] @{result.username}  ({result.source})  {result.detail}", flush=True)
+
+
+def load_env() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv()
+
+
+def make_api_checker(args: argparse.Namespace, required: bool):
+    """Telegram API включается сам, если в .env есть ключи; --no-api отключает его."""
+    if getattr(args, "no_api", False):
+        return None
+    api_id = os.environ.get("TG_API_ID", "").strip()
+    api_hash = os.environ.get("TG_API_HASH", "").strip()
+    if not api_id.isdigit() or not api_hash:
+        if required:
+            raise SystemExit(API_KEYS_HELP)
+        return None
+    try:
+        from .telegram_api import TelegramApiChecker
+
+        return TelegramApiChecker(int(api_id), api_hash, args.session, args.api_delay, args.max_flood_wait)
+    except ImportError:
+        if required:
+            raise SystemExit("Для Telegram API установите telethon: py -m pip install telethon")
+        print("Telegram API пропущен: не установлен telethon (py -m pip install telethon)", file=sys.stderr)
+        return None
 
 
 async def check_all(args: argparse.Namespace, candidates: list[tuple[str, str]], store: ResultStore):
     from .web import FragmentChecker, TmeChecker, make_client
 
-    api = None
-    if args.api:
-        api = _make_api_checker(args)
+    api = make_api_checker(args, required=args.api)
+    if api:
         await api.start()
     try:
         async with make_client(args.proxy) as client:
@@ -141,22 +195,55 @@ async def check_all(args: argparse.Namespace, candidates: list[tuple[str, str]],
             await api.stop()
 
 
-def _make_api_checker(args: argparse.Namespace):
+async def confirm_all(args: argparse.Namespace, candidates: list[tuple[str, str]], store: ResultStore):
+    api = make_api_checker(args, required=True)
+    await api.start()
     try:
-        from dotenv import load_dotenv
 
-        load_dotenv()
-    except ImportError:
-        pass
-    api_id, api_hash = os.environ.get("TG_API_ID"), os.environ.get("TG_API_HASH")
-    if not api_id or not api_hash or not api_id.isdigit():
-        raise SystemExit(
-            "Для --api нужны TG_API_ID и TG_API_HASH (https://my.telegram.org → API development tools). "
-            "Скопируйте .env.example в .env и заполните."
+        def on_result(result: Result) -> None:
+            store.add(result)
+            print_result(result, everything=True)
+
+        return await run_checks(candidates, ApiConfirmer(api), on_result, 1, total=len(candidates))
+    finally:
+        await api.stop()
+
+
+def run_confirm(args: argparse.Namespace) -> int:
+    store = ResultStore(args.out)
+    code = 0
+    try:
+        todo = sorted(
+            ((n, r["source"]) for n, r in store.rows.items() if r["status"] == st.LIKELY_FREE),
+            key=lambda item: (len(item[0]), item[0]),
+        )[: args.limit]
+        if not todo:
+            print(f"Нет «вероятно свободных» для проверки в {store.path}", file=sys.stderr)
+            return 0
+        print(f"Проверяю через Telegram API: {len(todo)}", file=sys.stderr)
+        asyncio.run(confirm_all(args, todo, store))
+    except KeyboardInterrupt:
+        print("\nОстановлено. Остальные проверятся при следующем запуске confirm.", file=sys.stderr)
+    except ApiUnavailable as e:
+        print(f"\n{e}. Остальные проверятся при следующем запуске confirm.", file=sys.stderr)
+        code = 1
+    finally:
+        written = store.write_findings()
+        store.close()
+    _report_files(written)
+    return code
+
+
+def _report_files(written: dict[str, Path]) -> None:
+    for status, path in written.items():
+        print(f"{st.LABELS[status]}: {path}", file=sys.stderr)
+    if st.LIKELY_FREE in written:
+        print(
+            "«Вероятно свободные» не подтверждены Telegram API: среди них могут быть зарезервированные "
+            "(в приложении «Некорректное имя»). Отсеять их: заполните .env и запустите "
+            "python -m tgparser confirm",
+            file=sys.stderr,
         )
-    from .telegram_api import TelegramApiChecker
-
-    return TelegramApiChecker(int(api_id), api_hash, args.session, args.api_delay, args.max_flood_wait)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -165,6 +252,10 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
 
     args = build_parser().parse_args(argv)
+    load_env()
+    if args.command == "confirm":
+        return run_confirm(args)
+
     try:
         candidates = collect_candidates(args)
     except (ValueError, OSError) as e:
@@ -206,8 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         written = store.write_findings()
         store.close()
 
-    for status, path in written.items():
-        print(f"{st.LABELS[status]}: {path}", file=sys.stderr)
+    _report_files(written)
     if stats and stats.get(st.ERROR):
         print(f"Ошибок: {stats[st.ERROR]} — они перепроверятся при следующем запуске.", file=sys.stderr)
     return 0

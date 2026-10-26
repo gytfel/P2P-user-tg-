@@ -5,7 +5,7 @@ LIKELY_FREE = "likely_free"  # на t.me нет профиля и не прод�
 FRAGMENT = "fragment"  # можно получить только на Fragment: аукцион, ставка или покупка
 TAKEN = "taken"  # занят: есть профиль/канал/бот или куплен на Fragment
 UNAVAILABLE = "unavailable"  # 4 символа, но на Fragment сейчас не продаётся
-INVALID = "invalid"  # Telegram не даёт его занять (резерв, запрещённое слово)
+INVALID = "invalid"  # Telegram не даёт его занять: в приложении «Некорректное имя» (резерв, бренд)
 ERROR = "error"  # проверка не удалась — при следующем запуске проверится снова
 
 LABELS = {
@@ -14,7 +14,7 @@ LABELS = {
     FRAGMENT: "FRAGMENT",
     TAKEN: "занят",
     UNAVAILABLE: "недоступен",
-    INVALID: "запрещён",
+    INVALID: "зарезервирован",
     ERROR: "ошибка",
 }
 

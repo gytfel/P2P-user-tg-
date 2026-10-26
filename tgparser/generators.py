@@ -53,7 +53,8 @@ def resolve_list(name: str) -> tuple[str, Path]:
 def read_wordlist(path: Path) -> Iterator[str]:
     with open(path, encoding="utf-8") as f:
         for line in f:
-            line = line.split("#", 1)[0].strip()
+            # «@name<TAB>source<TAB>detail» из файлов находок — берём только имя
+            line = line.split("\t", 1)[0].split("#", 1)[0].strip()
             if line:
                 yield normalize(line)
 

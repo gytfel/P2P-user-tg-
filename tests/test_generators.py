@@ -66,3 +66,12 @@ def test_words_length_filter(tmp_path):
     custom = tmp_path / "mine.txt"
     custom.write_text("# comment\nabcd\nAbcde\nCoca-Cola\n1abcde\nverylongword\n", encoding="utf-8")
     assert list(iter_words([str(custom)], 5, 10)) == [("abcde", "mine"), ("cocacola", "mine")]
+
+
+def test_findings_file_can_be_checked_again(tmp_path):
+    findings = tmp_path / "likely_free.txt"
+    findings.write_text(
+        "@bayern\tcompanies\tt.me: профиля нет, fragment: not listed\n@kriptoobmen\tcrypto\tt.me: профиля нет\n",
+        encoding="utf-8",
+    )
+    assert list(iter_words([str(findings)], 5, 32)) == [("bayern", "likely_free"), ("kriptoobmen", "likely_free")]

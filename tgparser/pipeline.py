@@ -17,6 +17,10 @@ class TooManyErrors(Exception):
     """Слишком много ошибок подряд — сайт недоступен или нас ограничили."""
 
 
+class ApiUnavailable(Exception):
+    """Telegram API перестал отвечать (долгий FloodWait)."""
+
+
 @dataclass
 class Result:
     username: str
@@ -69,7 +73,25 @@ class UsernameChecker:
             if verdict:
                 return Result(username, source, *verdict)
 
-        return Result(username, source, st.LIKELY_FREE, "t.me: профиля нет")
+        detail = "t.me: профиля нет"
+        if fragment_detail:
+            detail = f"{detail}, {fragment_detail}"
+        return Result(username, source, st.LIKELY_FREE, detail)
+
+
+class ApiConfirmer:
+    """Перепроверка уже найденных «вероятно свободных» только через Telegram API."""
+
+    def __init__(self, api):
+        self.api = api
+
+    async def check(self, username: str, source: str) -> Result:
+        verdict = await self.api.check(username)
+        if verdict:
+            return Result(username, source, *verdict)
+        if not self.api.enabled:
+            raise ApiUnavailable("Telegram API временно ограничил запросы (FloodWait)")
+        return Result(username, source, st.LIKELY_FREE, "api: не удалось проверить")
 
 
 async def run_checks(
