@@ -1,0 +1,11 @@
+# результаты проверок
+results/
+# сессия Telegram = доступ к аккаунту, не коммитить
+*.session
+*.session-journal
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
