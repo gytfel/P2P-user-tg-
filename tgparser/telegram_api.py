@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+from getpass import getpass
 
 from . import statuses as st
 
@@ -27,7 +28,11 @@ class TelegramApiChecker:
 
     async def start(self) -> None:
         # При первом запуске спросит телефон и код, дальше берёт сессию из файла.
-        await self.client.start()
+        await self.client.start(
+            phone=lambda: input("Номер телефона (например +79991234567): ").strip(),
+            code_callback=lambda: input("Код подтверждения из Telegram: ").strip(),
+            password=lambda: getpass("Облачный пароль (двухэтапная аутентификация, ввод скрыт): "),
+        )
         me = await self.client.get_me()
         print(f"Telegram API: вошли как @{me.username or me.id}", file=sys.stderr)
 

@@ -1,0 +1,2 @@
+# start.bat хранится с CRLF как есть: cmd.exe плохо читает .bat с LF
+*.bat -text

@@ -1,0 +1,93 @@
+import os
+
+import pytest
+
+import tgparser.cli as cli
+import tgparser.menu as menu
+
+
+def feed(monkeypatch, answers):
+    answers = iter(answers)
+
+    def fake_input(prompt=""):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise EOFError
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+
+@pytest.fixture
+def calls(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli, "main", lambda argv: seen.append(argv) or 0)
+    return seen
+
+
+def test_save_env_keeps_other_lines(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("# мой комментарий\nTG_API_ID=1\nOTHER=x\n", encoding="utf-8")
+    menu.save_env("123", "a" * 32, env)
+    assert env.read_text(encoding="utf-8") == f"# мой комментарий\nOTHER=x\nTG_API_ID=123\nTG_API_HASH={'a' * 32}\n"
+
+
+def test_setup_validates_and_saves(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(menu, "login", lambda: True)
+    feed(monkeypatch, ["abc", "123", "short", "0123456789abcdef0123456789ABCDEF"])
+    assert menu.setup_api()
+    assert "только цифры" in capsys.readouterr().out
+    assert os.environ["TG_API_ID"] == "123"
+    assert "TG_API_HASH=0123456789abcdef0123456789ABCDEF" in (tmp_path / ".env").read_text(encoding="utf-8")
+    assert menu.api_configured()
+
+
+def test_setup_can_be_cancelled(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "ENV_FILE", tmp_path / ".env")
+    feed(monkeypatch, [""])
+    assert not menu.setup_api()
+    assert not (tmp_path / ".env").exists()
+
+
+def test_menu_runs_selected_search(monkeypatch, calls):
+    feed(monkeypatch, ["н", "1", "", "5", "", "0"])
+    assert menu.run_menu() == 0
+    assert calls == [["words", "--lists", "crypto,companies"], ["short"]]
+
+
+def test_menu_custom_names(monkeypatch, calls):
+    feed(monkeypatch, ["н", "6", "@bayern kriptoobmen", "", "0"])
+    menu.run_menu()
+    assert calls == [["check", "@bayern", "kriptoobmen"]]
+
+
+def test_menu_confirm_asks_for_keys_first(tmp_path, monkeypatch, calls):
+    monkeypatch.setattr(cli, "ENV_FILE", tmp_path / ".env")
+    feed(monkeypatch, ["н", "7", "", "", "0"])  # отказались вводить api_id
+    menu.run_menu()
+    assert calls == []
+
+
+def test_menu_offers_setup_on_start(monkeypatch, calls):
+    started = []
+    monkeypatch.setattr(menu, "setup_api", lambda: started.append(1) or True)
+    feed(monkeypatch, ["д", "0"])
+    menu.run_menu()
+    assert started == [1]
+
+
+def test_menu_ignores_unknown_choice(monkeypatch, calls, capsys):
+    feed(monkeypatch, ["н", "42", "abc", "0"])
+    assert menu.run_menu() == 0
+    assert capsys.readouterr().out.count("Нет такого пункта") == 2
+
+
+def test_main_without_args_opens_menu(monkeypatch):
+    monkeypatch.setattr(menu, "run_menu", lambda: 7)
+    assert cli.main([]) == 7
+
+
+def test_setup_command(monkeypatch):
+    monkeypatch.setattr(menu, "setup_api", lambda: True)
+    assert cli.main(["setup"]) == 0

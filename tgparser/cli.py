@@ -1,4 +1,7 @@
-"""Командная строка: python -m tgparser {words,short,check,confirm} ..."""
+"""Командная строка: python -m tgparser {words,short,check,confirm,setup} ...
+
+Без аргументов открывается меню (так его запускает start.bat).
+"""
 from __future__ import annotations
 
 import argparse
@@ -15,9 +18,14 @@ from .pipeline import ApiConfirmer, ApiUnavailable, Result, TooManyErrors, Usern
 from .rules import MAX_LEN, MIN_LEN_COLLECTIBLE, MIN_LEN_REGULAR, normalize
 from .storage import ResultStore
 
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = PROJECT_DIR / ".env"
+DEFAULT_SESSION = PROJECT_DIR / "tgparser"
+DEFAULT_OUT = PROJECT_DIR / "results"
+
 API_KEYS_HELP = (
-    "Нужны TG_API_ID и TG_API_HASH (https://my.telegram.org → API development tools): "
-    "скопируйте .env.example в .env и впишите их."
+    "Нужны TG_API_ID и TG_API_HASH (https://my.telegram.org → API development tools). "
+    "Запустите настройку: python -m tgparser setup (или пункт меню в start.bat)."
 )
 
 
@@ -32,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     base = argparse.ArgumentParser(add_help=False)
     g = base.add_argument_group("общие настройки")
-    g.add_argument("--out", type=Path, default=Path("results"), help="папка для результатов (по умолчанию results)")
+    g.add_argument("--out", type=Path, default=DEFAULT_OUT, help="папка для результатов (по умолчанию results)")
     g.add_argument("--limit", type=int, help="проверить не больше N юзернеймов")
 
     web = argparse.ArgumentParser(add_help=False)
@@ -57,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = api.add_argument_group("Telegram API")
     g.add_argument("--api-delay", type=float, default=2.0, help="секунд между запросами к API (2.0)")
     g.add_argument("--max-flood-wait", type=int, default=900, help="при FloodWait дольше N секунд отключить API (900)")
-    g.add_argument("--session", default="tgparser", help="файл сессии Telethon (tgparser.session)")
+    g.add_argument("--session", default=str(DEFAULT_SESSION), help="файл сессии Telethon (tgparser.session)")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -109,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Перепроверяет через Telegram API все «вероятно свободные» из results.csv: "
         "зарезервированные («Некорректное имя» в приложении) уходят из списка находок.",
     )
+    sub.add_parser(
+        "setup",
+        help="ввести api_id и api_hash и войти в Telegram",
+        description="Спрашивает api_id и api_hash, сохраняет их в .env и выполняет вход в Telegram.",
+    )
     return parser
 
 
@@ -146,7 +159,7 @@ def load_env() -> None:
         from dotenv import load_dotenv
     except ImportError:
         return
-    load_dotenv()
+    load_dotenv(ENV_FILE, override=True)
 
 
 def make_api_checker(args: argparse.Namespace, required: bool):
@@ -251,8 +264,17 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
 
-    args = build_parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
     load_env()
+    if not argv:
+        from .menu import run_menu
+
+        return run_menu()
+    args = build_parser().parse_args(argv)
+    if args.command == "setup":
+        from .menu import setup_api
+
+        return 0 if setup_api() else 1
     if args.command == "confirm":
         return run_confirm(args)
 

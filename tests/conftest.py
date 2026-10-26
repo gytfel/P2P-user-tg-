@@ -19,5 +19,8 @@ def no_real_telegram_keys(monkeypatch):
     import tgparser.cli
 
     monkeypatch.setattr(tgparser.cli, "load_env", lambda: None)
-    monkeypatch.delenv("TG_API_ID", raising=False)
-    monkeypatch.delenv("TG_API_HASH", raising=False)
+    for key in ("TG_API_ID", "TG_API_HASH"):
+        # setenv + delenv: после теста переменная вернётся к исходному состоянию,
+        # даже если код (мастер настройки) запишет её напрямую в os.environ
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
