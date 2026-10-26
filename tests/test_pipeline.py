@@ -182,3 +182,24 @@ def test_cli_stops_when_site_is_down(tmp_path, monkeypatch, capsys):
     assert "ошибок подряд" in capsys.readouterr().err
     errors = read_csv(out / "results.csv")
     assert 30 <= len(errors) <= 32 and all(r["status"] == st.ERROR for r in errors.values())
+
+
+def test_search_continues_without_api_when_offline(tmp_path, monkeypatch, capsys):
+    import tgparser.cli as cli
+
+    class OfflineApi:
+        stopped = False
+
+        async def start(self):
+            raise ConnectionError("Connection to Telegram failed 3 time(s)")
+
+        async def stop(self):
+            OfflineApi.stopped = True
+
+    monkeypatch.setattr(web, "make_client", mock_make_client)
+    monkeypatch.setattr(cli, "make_api_checker", lambda args, required: None if args.no_api else OfflineApi())
+    out = tmp_path / "out"
+    assert main(["check", "freename", "--out", str(out), "--tme-delay", "0", "--fragment-delay", "0"]) == 0
+    assert read_csv(out / "results.csv")["freename"]["status"] == st.LIKELY_FREE
+    assert OfflineApi.stopped
+    assert "Продолжаю без Telegram API" in capsys.readouterr().err

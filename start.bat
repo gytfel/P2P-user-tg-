@@ -23,7 +23,7 @@ echo Creating Python environment in .venv ...
 %PY% -m venv .venv || goto fail
 
 :deps
-".venv\Scripts\python.exe" -c "import httpx, telethon, dotenv" >nul 2>nul && goto run
+".venv\Scripts\python.exe" -c "import httpx, telethon, dotenv, python_socks" >nul 2>nul && goto run
 echo Installing libraries - only the first time, 1-2 minutes ...
 ".venv\Scripts\python.exe" -m pip install --no-cache-dir --disable-pip-version-check -r requirements.txt || goto fail
 

@@ -1,3 +1,4 @@
 httpx[socks]>=0.26
 telethon>=1.36
+python-socks[asyncio]>=2.4  # прокси для Telegram API
 python-dotenv>=1.0

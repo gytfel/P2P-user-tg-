@@ -106,8 +106,9 @@ def api_args(**kw):
 
 
 class FakeTelegramApiChecker:
-    def __init__(self, *args):
+    def __init__(self, *args, proxy=None):
         self.args = args
+        self.proxy = proxy
 
 
 def test_api_turns_on_when_keys_present(monkeypatch):
@@ -119,6 +120,9 @@ def test_api_turns_on_when_keys_present(monkeypatch):
     monkeypatch.setenv("TG_API_HASH", "abc")
     checker = cli.make_api_checker(api_args(), required=False)
     assert isinstance(checker, FakeTelegramApiChecker) and checker.args[:2] == (123, "abc")
+    assert checker.proxy is None
+    monkeypatch.setenv("TG_PROXY", "socks5://127.0.0.1:1080")
+    assert cli.make_api_checker(api_args(), required=False).proxy == "socks5://127.0.0.1:1080"
     assert cli.make_api_checker(api_args(no_api=True), required=False) is None
 
 
@@ -130,3 +134,15 @@ def test_api_flag_requires_keys():
 def test_api_and_no_api_conflict():
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["check", "abcde", "--api", "--no-api"])
+
+
+class OfflineApi(FakeApi):
+    async def start(self):
+        raise ConnectionError("Connection to Telegram failed 3 time(s)")
+
+
+def test_confirm_without_connection_explains(results, monkeypatch):
+    monkeypatch.setattr(cli, "make_api_checker", lambda args, required: OfflineApi({}))
+    with pytest.raises(SystemExit, match="VPN"):
+        cli.main(["confirm", "--out", str(results)])
+    assert statuses(results)["bayern"] == st.LIKELY_FREE

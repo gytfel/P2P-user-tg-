@@ -28,8 +28,9 @@ def calls(monkeypatch):
 def test_save_env_keeps_other_lines(tmp_path):
     env = tmp_path / ".env"
     env.write_text("# мой комментарий\nTG_API_ID=1\nOTHER=x\n", encoding="utf-8")
-    menu.save_env("123", "a" * 32, env)
+    menu.save_env({"TG_API_ID": "123", "TG_API_HASH": "a" * 32}, env)
     assert env.read_text(encoding="utf-8") == f"# мой комментарий\nOTHER=x\nTG_API_ID=123\nTG_API_HASH={'a' * 32}\n"
+    assert os.environ["TG_API_ID"] == "123"
 
 
 def test_setup_validates_and_saves(tmp_path, monkeypatch, capsys):
@@ -91,3 +92,71 @@ def test_main_without_args_opens_menu(monkeypatch):
 def test_setup_command(monkeypatch):
     monkeypatch.setattr(menu, "setup_api", lambda: True)
     assert cli.main(["setup"]) == 0
+
+
+def test_setup_reuses_saved_keys(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "ENV_FILE", tmp_path / ".env")
+    menu.save_env({"TG_API_ID": "123", "TG_API_HASH": "a" * 32})
+    logins = []
+    monkeypatch.setattr(menu, "login", lambda: logins.append(1) or True)
+    feed(monkeypatch, ["н"])  # не вводить ключи заново
+    assert menu.setup_api()
+    assert logins == [1]
+
+
+class FlakyTelegram:
+    """Первый вход падает по таймауту, следующий — успешный."""
+
+    instances = []
+
+    def __init__(self, *args, proxy=None):
+        self.proxy = proxy
+        FlakyTelegram.instances.append(self)
+
+    async def start(self):
+        if len(FlakyTelegram.instances) == 1:
+            raise ConnectionError("Connection to Telegram failed 3 time(s)")
+
+    async def stop(self):
+        pass
+
+
+@pytest.fixture
+def flaky(tmp_path, monkeypatch):
+    import tgparser.telegram_api
+
+    FlakyTelegram.instances = []
+    monkeypatch.setattr(tgparser.telegram_api, "TelegramApiChecker", FlakyTelegram)
+    monkeypatch.setattr(cli, "ENV_FILE", tmp_path / ".env")
+    menu.save_env({"TG_API_ID": "123", "TG_API_HASH": "a" * 32})
+    return tmp_path / ".env"
+
+
+def test_login_asks_for_proxy_after_timeout(flaky, monkeypatch, capsys):
+    feed(monkeypatch, ["не прокси", "socks5://user:pass@1.2.3.4:1080"])
+    assert menu.login()
+    out = capsys.readouterr().out
+    assert "VPN" in out and "Не похоже на прокси" in out
+    assert [t.proxy for t in FlakyTelegram.instances] == [None, "socks5://user:pass@1.2.3.4:1080"]
+    assert "TG_PROXY=socks5://user:pass@1.2.3.4:1080" in flaky.read_text(encoding="utf-8")
+
+
+def test_login_retry_after_vpn(flaky, monkeypatch):
+    feed(monkeypatch, ["", "д"])  # прокси не нужен — включили VPN, пробуем ещё раз
+    assert menu.login()
+    assert len(FlakyTelegram.instances) == 2
+    assert "TG_PROXY" not in flaky.read_text(encoding="utf-8")
+
+
+def test_login_gives_up(flaky, monkeypatch):
+    feed(monkeypatch, ["", "н"])
+    assert not menu.login()
+
+
+def test_login_can_remove_bad_proxy(flaky, monkeypatch):
+    menu.save_env({"TG_PROXY": "socks5://9.9.9.9:1"})
+    feed(monkeypatch, ["-"])
+    assert menu.login()
+    assert [t.proxy for t in FlakyTelegram.instances] == ["socks5://9.9.9.9:1", ""]
+    assert "TG_PROXY=\n" in flaky.read_text(encoding="utf-8")
+    assert "(через прокси)" not in menu._status()

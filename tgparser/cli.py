@@ -175,20 +175,45 @@ def make_api_checker(args: argparse.Namespace, required: bool):
     try:
         from .telegram_api import TelegramApiChecker
 
-        return TelegramApiChecker(int(api_id), api_hash, args.session, args.api_delay, args.max_flood_wait)
-    except ImportError:
+        return TelegramApiChecker(
+            int(api_id),
+            api_hash,
+            args.session,
+            args.api_delay,
+            args.max_flood_wait,
+            proxy=os.environ.get("TG_PROXY"),
+        )
+    except ImportError as e:
+        problem = f"не хватает библиотеки ({e.name}) — запустите start.bat ещё раз или: py -m pip install -r requirements.txt"
+    except ValueError as e:
+        problem = f"TG_PROXY в .env: {e}"
+    if required:
+        raise SystemExit(f"Telegram API: {problem}")
+    print(f"Telegram API пропущен: {problem}", file=sys.stderr)
+    return None
+
+
+async def start_api(api, required: bool) -> bool:
+    """Подключение к Telegram; без связи поиск продолжается без API (или останавливается, если API обязателен)."""
+    from .telegram_api import CONNECT_HELP
+
+    try:
+        await api.start()
+        return True
+    except (OSError, asyncio.TimeoutError):
+        await api.stop()
         if required:
-            raise SystemExit("Для Telegram API установите telethon: py -m pip install telethon")
-        print("Telegram API пропущен: не установлен telethon (py -m pip install telethon)", file=sys.stderr)
-        return None
+            raise SystemExit(CONNECT_HELP)
+        print(f"{CONNECT_HELP}\n\nПродолжаю без Telegram API.\n", file=sys.stderr)
+        return False
 
 
 async def check_all(args: argparse.Namespace, candidates: list[tuple[str, str]], store: ResultStore):
     from .web import FragmentChecker, TmeChecker, make_client
 
     api = make_api_checker(args, required=args.api)
-    if api:
-        await api.start()
+    if api and not await start_api(api, required=args.api):
+        api = None
     try:
         async with make_client(args.proxy) as client:
             checker = UsernameChecker(
@@ -210,7 +235,7 @@ async def check_all(args: argparse.Namespace, candidates: list[tuple[str, str]],
 
 async def confirm_all(args: argparse.Namespace, candidates: list[tuple[str, str]], store: ResultStore):
     api = make_api_checker(args, required=True)
-    await api.start()
+    await start_api(api, required=True)
     try:
 
         def on_result(result: Result) -> None:

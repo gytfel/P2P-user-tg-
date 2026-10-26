@@ -5,7 +5,31 @@ import pytest
 errors = pytest.importorskip("telethon.errors")
 
 from tgparser import statuses as st  # noqa: E402
-from tgparser.telegram_api import TelegramApiChecker  # noqa: E402
+from tgparser.telegram_api import TelegramApiChecker, proxy_kwargs  # noqa: E402
+
+
+def test_proxy_kwargs():
+    assert proxy_kwargs(None) == proxy_kwargs("  ") == {}
+    assert proxy_kwargs("socks5://us%40er:p%3Ass@1.2.3.4:1080")["proxy"] == {
+        "proxy_type": "socks5",
+        "addr": "1.2.3.4",
+        "port": 1080,
+        "username": "us@er",
+        "password": "p:ss",
+        "rdns": True,
+    }
+    assert proxy_kwargs("http://proxy.local:8080")["proxy"]["username"] is None
+
+
+@pytest.mark.parametrize("bad", ["1.2.3.4:1080", "socks5://1.2.3.4", "socks5://1.2.3.4:port", "ftp://a:1", "tg://proxy?x"])
+def test_proxy_kwargs_rejects_garbage(bad):
+    with pytest.raises(ValueError):
+        proxy_kwargs(bad)
+
+
+def test_client_gets_proxy(tmp_path):
+    checker = TelegramApiChecker(1, "hash", str(tmp_path / "s"), 0, 60, proxy="socks5://1.2.3.4:1080")
+    assert checker.client._proxy["addr"] == "1.2.3.4"
 
 
 class FakeClient:
