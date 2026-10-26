@@ -3,6 +3,7 @@ import asyncio
 import csv
 
 import pytest
+from conftest import entries
 
 import tgparser.cli as cli
 from tgparser import statuses as st
@@ -79,7 +80,8 @@ def test_confirm_removes_reserved(results, monkeypatch, capsys):
     }
     assert api.calls == ["bayern", "someword", "kriptoobmen"]  # короткие первыми, занятые не трогаем
     assert api.started and api.stopped
-    assert (results / "free.txt").read_text(encoding="utf-8").startswith("@kriptoobmen\t")
+    assert entries(results / "free.txt") == ["@kriptoobmen\ttest\tapi: свободен"]
+    assert "можно занять бесплатно" in (results / "free.txt").read_text(encoding="utf-8")
     assert not (results / "likely_free.txt").exists()
     assert "[зарезервирован] @bayern" in capsys.readouterr().out
 

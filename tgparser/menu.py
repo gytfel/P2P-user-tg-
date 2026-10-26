@@ -181,12 +181,25 @@ def _open_results() -> None:
         print(cli.DEFAULT_OUT)
 
 
+def _run_words(argv: list[str]) -> None:
+    """Поиск 5+ символов: без входа в API честно предупреждаем, что находки не проверены."""
+    if not logged_in():
+        print(
+            "Вход в Telegram API не выполнен (нужен VPN — пункт 8). Без него парсер не может отличить\n"
+            "свободные имена от зарезервированных: находки будут «НЕ ПРОВЕРЕН», и многие из них\n"
+            "в приложении окажутся «Некорректное имя». Проверить их можно позже — пункт 7 с VPN."
+        )
+        if input("Всё равно искать? [д/н]: ").strip().lower() not in YES:
+            return
+    _run(argv)
+
+
 MENU: list[tuple[str, Callable[[], object]]] = [
-    ("Крипта и компании", lambda: _run(["words", "--lists", "crypto,companies"])),
-    ("Все реальные слова: крипта, компании, английские, русские (долго, ~6 ч)", lambda: _run(["words"])),
-    ("4-буквенные слова из крипты и компаний (doge, defi, usdt…)", lambda: _run(["words", "--min-len", "4", "--max-len", "4"])),
-    ("Красивые 4-символьные: aaaa, abab, abba… (~1 ч)", lambda: _run(["short", "--preset", "pretty"])),
-    ("Все 4-символьные: красивые → читаемые → все буквы (долго, ~3 суток)", lambda: _run(["short"])),
+    ("Крипта и компании — бесплатные, от 5 символов", lambda: _run_words(["words", "--lists", "crypto,companies"])),
+    ("Все реальные слова — бесплатные, от 5 символов (долго, ~6 ч)", lambda: _run_words(["words"])),
+    ("4-буквенные слова (doge, defi…) — только КУПИТЬ на Fragment", lambda: _run(["words", "--min-len", "4", "--max-len", "4"])),
+    ("Красивые 4-символьные (aaaa, abab…) — только КУПИТЬ на Fragment (~1 ч)", lambda: _run(["short", "--preset", "pretty"])),
+    ("Все 4-символьные — только КУПИТЬ на Fragment (долго, ~3 суток)", lambda: _run(["short"])),
     ("Проверить свои юзернеймы", _check_custom),
     ("Перепроверить найденные через Telegram API (убрать «Некорректное имя»)", _confirm),
     ("Настроить Telegram API (api_id и api_hash)", setup_api),

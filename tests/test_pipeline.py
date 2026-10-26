@@ -2,7 +2,7 @@ import asyncio
 import csv
 
 import httpx
-from conftest import fixture
+from conftest import entries, fixture
 
 import tgparser.web as web
 from tgparser import statuses as st
@@ -136,11 +136,15 @@ def test_cli_end_to_end_and_resume(tmp_path, monkeypatch, capsys):
         "brokenpage": st.ERROR,
     }
     assert rows["qzxw"]["detail"] == "fragment: available, 10 TON"
-    assert (out / "likely_free.txt").read_text(encoding="utf-8").startswith("@freename\t")
-    fragment_lines = (out / "fragment.txt").read_text(encoding="utf-8").splitlines()
+    assert [l.split("\t")[0] for l in entries(out / "likely_free.txt")] == ["@freename"]
+    assert "Некорректное имя" in (out / "likely_free.txt").read_text(encoding="utf-8")
+    fragment_lines = entries(out / "fragment.txt")
     assert [l.split("\t")[0] for l in fragment_lines] == ["@qzxw", "@qzxwa"]
-    printed = capsys.readouterr().out
-    assert "@freename" in printed and "@durov" not in printed
+    assert fragment_lines[0].endswith("\thttps://fragment.com/username/qzxw")
+    printed = capsys.readouterr()
+    assert "[НЕ ПРОВЕРЕН] @freename" in printed.out and "@durov" not in printed.out
+    assert "[ТОЛЬКО КУПИТЬ НА FRAGMENT] @qzxw" in printed.out
+    assert "ВНИМАНИЕ" in printed.err
 
     # Повторный запуск проверяет только ошибки.
     TAKEN_ON_TME.add("brokenpage")

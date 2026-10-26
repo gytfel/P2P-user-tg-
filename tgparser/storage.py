@@ -56,8 +56,11 @@ class ResultStore:
             path = self.out_dir / f"{status}.txt"
             if rows:
                 with open(path, "w", encoding="utf-8") as f:
+                    for line in st.FINDINGS_HEADERS[status].splitlines():
+                        f.write(f"# {line}\n")
                     for r in rows:
-                        f.write(f"@{r['username']}\t{r['source']}\t{r['detail']}\n")
+                        extra = f"\t{st.fragment_link(r['username'])}" if status == st.FRAGMENT else ""
+                        f.write(f"@{r['username']}\t{r['source']}\t{r['detail']}{extra}\n")
                 written[status] = path
             elif path.exists():
                 path.unlink()

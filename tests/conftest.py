@@ -10,6 +10,11 @@ def fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
+def entries(path: Path) -> list[str]:
+    """Строки файла находок без пояснения в начале."""
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith("#")]
+
+
 import pytest  # noqa: E402
 
 

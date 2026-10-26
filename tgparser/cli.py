@@ -151,7 +151,8 @@ def _iter_custom(items: Iterable[str]) -> Iterator[tuple[str, str]]:
 def print_result(result: Result, everything: bool = False) -> None:
     if everything or result.status in st.FINDINGS:
         label = st.LABELS[result.status]
-        print(f"[{label}] @{result.username}  ({result.source})  {result.detail}", flush=True)
+        link = f"  {st.fragment_link(result.username)}" if result.status == st.FRAGMENT else ""
+        print(f"[{label}] @{result.username}  ({result.source})  {result.detail}{link}", flush=True)
 
 
 def load_env() -> None:
@@ -295,9 +296,15 @@ def _report_files(written: dict[str, Path]) -> None:
         print(f"{st.LABELS[status]}: {path}", file=sys.stderr)
     if st.LIKELY_FREE in written:
         print(
-            "«Вероятно свободные» не подтверждены Telegram API: среди них могут быть зарезервированные "
-            "(в приложении «Некорректное имя»). Отсеять их: заполните .env и запустите "
-            "python -m tgparser confirm",
+            "\nВНИМАНИЕ: «НЕ ПРОВЕРЕН» — Telegram API их не подтвердил (нужен VPN). Многие из них "
+            "зарезервированы, и приложение напишет «Некорректное имя». Отсеять: включите VPN и выберите "
+            "в меню «Перепроверить найденные» (или python -m tgparser confirm).",
+            file=sys.stderr,
+        )
+    if st.FRAGMENT in written:
+        print(
+            "«ТОЛЬКО КУПИТЬ НА FRAGMENT» нельзя занять в приложении (там будет «Некорректное имя») — "
+            "только купить на fragment.com за TON.",
             file=sys.stderr,
         )
 

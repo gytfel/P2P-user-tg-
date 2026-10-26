@@ -52,9 +52,25 @@ def test_setup_can_be_cancelled(tmp_path, monkeypatch):
 
 
 def test_menu_runs_selected_search(monkeypatch, calls):
-    feed(monkeypatch, ["н", "1", "", "5", "", "0"])
+    # без входа в API поиск слов спрашивает подтверждение, 4-символьные — нет
+    feed(monkeypatch, ["н", "1", "д", "", "5", "", "0"])
     assert menu.run_menu() == 0
     assert calls == [["words", "--lists", "crypto,companies"], ["short"]]
+
+
+def test_word_search_can_be_declined_without_api(monkeypatch, calls, capsys):
+    feed(monkeypatch, ["н", "2", "н", "", "0"])
+    menu.run_menu()
+    assert calls == []
+    assert "НЕ ПРОВЕРЕН" in capsys.readouterr().out
+
+
+def test_word_search_runs_straight_after_login(tmp_path, monkeypatch, calls):
+    monkeypatch.setattr(cli, "ENV_FILE", tmp_path / ".env")
+    menu.save_env({"TG_API_ID": "123", "TG_API_HASH": "a" * 32, "TG_USER": "@tester"})
+    feed(monkeypatch, ["2", "", "0"])
+    menu.run_menu()
+    assert calls == [["words"]]
 
 
 def test_menu_custom_names(monkeypatch, calls):
